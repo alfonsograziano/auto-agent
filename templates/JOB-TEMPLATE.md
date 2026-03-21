@@ -1,5 +1,3 @@
-# Job: [Give this job a short, descriptive name]
-
 ## Objective
 
 <!-- What is the main goal of this optimization job? Be specific about what "better" means.

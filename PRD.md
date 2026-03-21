@@ -168,12 +168,19 @@ The orchestrator decides which metric(s) to optimize based on configuration. A t
 ### 5.1 Optimization Loop (End-to-End)
 
 ```
-[Human triggers: npx auto-agent run --job <job-id>]
+[Human creates job: npm run create-job -- --id <job-id>]
+   Creates job folder with JOB.md, MEMORY.md, hypotheses/, results.db.
         │
         ▼
-[1. JOB SETUP]
-   Read job.md for objective, constraints, eval command, target repo path.
-   Create job folder if first run. Initialize MEMORY.md and results.db.
+[Human fills in JOB.md and optionally seeds MEMORY.md]
+        │
+        ▼
+[Human runs job: npm run run-job -- --id <job-id>]
+        │
+        ▼
+[1. JOB LOAD]
+   Read JOB.md for objective, constraints, eval command, target repo path.
+   Validate that required fields are filled in.
         │
         ▼
 [2. BASELINE EVAL]
@@ -622,21 +629,23 @@ The analyzer should prioritize lower tiers first — no point attempting calculu
 The system is a TypeScript CLI. The human triggers jobs manually.
 
 ```bash
-# Create a new job from template
-npx auto-agent init --job my-math-agent
-# → Creates jobs/my-math-agent/job.md (edit this before running)
+# 1. Create a new job (scaffolds folder with templates + SQLite db)
+npm run create-job -- --id my-math-agent
+# → Creates jobs/my-math-agent/ with JOB.md, MEMORY.md, hypotheses/, results.db
 
-# Run an optimization job
-npx auto-agent run --job my-math-agent
+# 2. Human fills in JOB.md and optionally seeds MEMORY.md
+
+# 3. Run the optimization job
+npm run run-job -- --id my-math-agent
 
 # Run with max hypotheses override
-npx auto-agent run --job my-math-agent --max-hypotheses 5
+npm run run-job -- --id my-math-agent --max-hypotheses 5
 
 # View job status / results
-npx auto-agent status --job my-math-agent
+npm run job-status -- --id my-math-agent
 
 # List all jobs
-npx auto-agent list
+npm run list-jobs
 ```
 
 ## 13. Error Handling and Safety
