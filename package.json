@@ -9,7 +9,6 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "create-job": "node scripts/create-job.ts",
-    "run-baseline-evals": "node scripts/run-baseline-evals.ts",
     "run-job": "node scripts/run-job.ts"
   },
   "devDependencies": {

@@ -1,101 +1,62 @@
-import { parseArgs } from "node:util";
-import { readFile, copyFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { existsSync } from "node:fs";
-import { spawn, execFileSync } from "node:child_process";
+import { copyFile } from "node:fs/promises";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { createHypothesis } from "../utils/create-hypothesis.ts";
+import { runClaude } from "../utils/run-claude.ts";
 
-const { values } = parseArgs({
-  options: {
-    id: { type: "string", short: "i" },
-  },
-  strict: true,
-});
-
-if (!values.id) {
-  console.error("Usage: node scripts/run-baseline-evals.ts --id <job-id>");
-  process.exit(1);
+interface RunBaselineOptions {
+  jobId: string;
+  jobDir: string;
+  jobMd: string;
+  targetRepoPath: string;
+  baseBranch: string;
+  projectRoot: string;
 }
 
-const jobId = values.id;
-const projectRoot = resolve(import.meta.dirname, "..");
-const jobDir = join(projectRoot, "jobs", jobId);
+export async function runBaselineEvals(options: RunBaselineOptions) {
+  const { jobId, jobDir, jobMd, targetRepoPath, baseBranch, projectRoot } =
+    options;
 
-if (!existsSync(jobDir)) {
-  console.error(`Error: Job folder not found at ${jobDir}`);
-  console.error(`Run: npm run create-job -- --id ${jobId}`);
-  process.exit(1);
-}
+  const baselineBranch = `${jobId}-baseline`;
 
-const jobMdPath = join(jobDir, "JOB.md");
-const jobMd = await readFile(jobMdPath, "utf-8");
+  function git(...args: string[]): string {
+    return execFileSync("git", args, {
+      cwd: targetRepoPath,
+      encoding: "utf-8",
+    }).trim();
+  }
 
-// Parse target repo path and branch from JOB.md
-const pathMatch = jobMd.match(/\*\*Path\*\*:\s*(.+)/);
-const branchMatch = jobMd.match(/\*\*Branch\*\*:\s*(.+)/);
+  console.log(`Checking out base branch "${baseBranch}" in target repo...`);
+  const currentBranch = git("rev-parse", "--abbrev-ref", "HEAD");
+  if (currentBranch !== baseBranch) {
+    git("checkout", baseBranch);
+  }
+  console.log(`On branch: ${git("rev-parse", "--abbrev-ref", "HEAD")}`);
 
-if (!pathMatch || !branchMatch) {
-  console.error(
-    "Error: Could not parse Target Repository path or branch from JOB.md"
-  );
-  console.error(
-    "Make sure JOB.md has **Path**: and **Branch**: under Target Repository"
-  );
-  process.exit(1);
-}
+  console.log(`Switching to branch "${baselineBranch}"...`);
+  try {
+    git("checkout", "-b", baselineBranch);
+  } catch {
+    git("checkout", baselineBranch);
+  }
+  console.log(`On branch: ${git("rev-parse", "--abbrev-ref", "HEAD")}`);
 
-const targetRepoRelative = pathMatch[1].trim();
-const baseBranch = branchMatch[1].trim();
-const targetRepoPath = resolve(jobDir, targetRepoRelative);
+  const hypothesis = await createHypothesis({
+    jobDir,
+    id: "000-baseline",
+    statement:
+      "Baseline evaluation — run evals on the current state of the target agent without any changes.",
+    branchName: baselineBranch,
+  });
 
-if (!existsSync(targetRepoPath)) {
-  console.error(`Error: Target repo not found at ${targetRepoPath}`);
-  process.exit(1);
-}
+  const reportTemplatePath = join(projectRoot, "templates", "REPORT-TEMPLATE.md");
+  await copyFile(reportTemplatePath, join(hypothesis.dir, "REPORT.md"));
 
-// Git: checkout base branch as safety check, then create baseline branch
-const baselineBranch = `${jobId}-baseline`;
+  console.log(`Created baseline hypothesis: ${hypothesis.dir}`);
+  console.log(`Spawning Claude Code to run baseline evals...`);
+  console.log();
 
-function git(...args: string[]): string {
-  return execFileSync("git", args, {
-    cwd: targetRepoPath,
-    encoding: "utf-8",
-  }).trim();
-}
-
-console.log(`Checking out base branch "${baseBranch}" in target repo...`);
-const currentBranch = git("rev-parse", "--abbrev-ref", "HEAD");
-if (currentBranch !== baseBranch) {
-  git("checkout", baseBranch);
-}
-console.log(`On branch: ${git("rev-parse", "--abbrev-ref", "HEAD")}`);
-
-console.log(`Switching to branch "${baselineBranch}"...`);
-try {
-  git("checkout", "-b", baselineBranch);
-} catch {
-  git("checkout", baselineBranch);
-}
-console.log(`On branch: ${git("rev-parse", "--abbrev-ref", "HEAD")}`);
-
-// Create the baseline hypothesis
-const hypothesis = await createHypothesis({
-  jobDir,
-  id: "000-baseline",
-  statement:
-    "Baseline evaluation — run evals on the current state of the target agent without any changes.",
-  branchName: baselineBranch,
-});
-
-// Copy the report template into the hypothesis folder
-const reportTemplatePath = join(projectRoot, "templates", "REPORT-TEMPLATE.md");
-await copyFile(reportTemplatePath, join(hypothesis.dir, "REPORT.md"));
-
-console.log(`Created baseline hypothesis: ${hypothesis.dir}`);
-console.log(`Spawning Claude Code to run baseline evals...`);
-console.log();
-
-const systemPrompt = `You are an evaluation runner. You run evals on a target repository and update a structured report.
+  const systemPrompt = `You are an evaluation runner. You run evals on a target repository and update a structured report.
 
 ## Context
 - Target repository: ${targetRepoPath} (branch: "${baselineBranch}")
@@ -130,58 +91,21 @@ VERIFY before finishing:
 ## Job Configuration
 ${jobMd}`;
 
-const userPrompt = `Run the baseline evals for job "${jobId}" and write the report.`;
+  const userPrompt = `Run the baseline evals for job "${jobId}" and write the report.`;
 
-const claude = spawn(
-  "claude",
-  [
-    "--print",
-    "--output-format",
-    "stream-json",
-    "--verbose",
-    "--dangerously-skip-permissions",
-    "--system-prompt",
+  const exitCode = await runClaude(
     systemPrompt,
-    "--add-dir",
-    jobDir,
-    "-p",
     userPrompt,
-  ],
-  {
-    cwd: targetRepoPath,
-    stdio: ["ignore", "pipe", "inherit"],
-  }
-);
+    targetRepoPath,
+    jobDir
+  );
 
-// Stream NDJSON events and print a human-readable summary for each
-claude.stdout.on("data", (chunk: Buffer) => {
-  for (const line of chunk.toString().split("\n").filter(Boolean)) {
-    try {
-      const event = JSON.parse(line);
-      if (event.type === "assistant" && event.message?.content) {
-        for (const block of event.message.content) {
-          if (block.type === "text") {
-            process.stdout.write(block.text);
-          } else if (block.type === "tool_use") {
-            console.log(`\n[tool] ${block.name}: ${JSON.stringify(block.input).slice(0, 200)}`);
-          }
-        }
-      } else if (event.type === "result") {
-        console.log("\n[done]", event.subtype ?? "");
-      }
-    } catch {
-      // not valid JSON, skip
-    }
+  if (exitCode !== 0) {
+    console.error(`Claude Code exited with code ${exitCode}`);
+    process.exit(exitCode);
   }
-});
 
-claude.on("close", (code) => {
-  if (code === 0) {
-    console.log();
-    console.log("Baseline evals completed.");
-    console.log(`Report: ${hypothesis.dir}/REPORT.md`);
-  } else {
-    console.error(`Claude Code exited with code ${code}`);
-    process.exit(code ?? 1);
-  }
-});
+  console.log();
+  console.log("Baseline evals completed.");
+  console.log(`Report: ${hypothesis.dir}/REPORT.md`);
+}

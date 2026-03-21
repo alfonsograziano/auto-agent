@@ -2,11 +2,13 @@ import { parseArgs } from "node:util";
 import { readFile, copyFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { spawn, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createHypothesis } from "../utils/create-hypothesis.ts";
+import { runClaude } from "../utils/run-claude.ts";
+import { runBaselineEvals } from "./run-baseline-evals.ts";
 
-// --- CLI parsing (Task 1) ---
+// --- CLI parsing ---
 
 const { values } = parseArgs({
   options: {
@@ -67,22 +69,25 @@ function git(...args: string[]): string {
   }).trim();
 }
 
-// --- Auto-run baseline if missing (Task 3) ---
+// --- Auto-run baseline if missing ---
 
 const baselineDir = join(jobDir, "hypotheses", "000-baseline");
 const baselineBranch = `${jobId}-baseline`;
 
 if (!existsSync(baselineDir)) {
-  console.log("Baseline not found. Running baseline evals...");
-  execFileSync(
-    "node",
-    [join(projectRoot, "scripts", "run-baseline-evals.ts"), "--id", jobId],
-    { cwd: projectRoot, stdio: "inherit" }
-  );
-  console.log("Baseline complete.\n");
+  console.log("Baseline not found. Running baseline evals...\n");
+  await runBaselineEvals({
+    jobId,
+    jobDir,
+    jobMd,
+    targetRepoPath,
+    baseBranch,
+    projectRoot,
+  });
+  console.log();
 }
 
-// --- Read baseline REPORT.md (read once, constant across iterations) (Task 4) ---
+// --- Read baseline REPORT.md (read once, constant across iterations) ---
 
 const baselineReportPath = join(baselineDir, "REPORT.md");
 if (!existsSync(baselineReportPath)) {
@@ -104,66 +109,7 @@ if (currentBranch !== baselineBranch) {
   }
 }
 
-// --- Claude Code spawn helper wrapped in Promise (Task 7) ---
-
-function runClaude(
-  systemPrompt: string,
-  userPrompt: string,
-  cwd: string,
-  addDir: string
-): Promise<number> {
-  return new Promise((resolve) => {
-    const claude = spawn(
-      "claude",
-      [
-        "--print",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--system-prompt",
-        systemPrompt,
-        "--add-dir",
-        addDir,
-        "-p",
-        userPrompt,
-      ],
-      {
-        cwd,
-        stdio: ["ignore", "pipe", "inherit"],
-      }
-    );
-
-    claude.stdout.on("data", (chunk: Buffer) => {
-      for (const line of chunk.toString().split("\n").filter(Boolean)) {
-        try {
-          const event = JSON.parse(line);
-          if (event.type === "assistant" && event.message?.content) {
-            for (const block of event.message.content) {
-              if (block.type === "text") {
-                process.stdout.write(block.text);
-              } else if (block.type === "tool_use") {
-                console.log(
-                  `\n[tool] ${block.name}: ${JSON.stringify(block.input).slice(0, 200)}`
-                );
-              }
-            }
-          } else if (event.type === "result") {
-            console.log("\n[done]", event.subtype ?? "");
-          }
-        } catch {
-          // not valid JSON, skip
-        }
-      }
-    });
-
-    claude.on("close", (code) => {
-      resolve(code ?? 1);
-    });
-  });
-}
-
-// --- Decision parser (Task 8) ---
+// --- Helpers ---
 
 function parseDecision(
   reportContent: string
@@ -172,12 +118,8 @@ function parseDecision(
   return (match?.[1] as "CONTINUE" | "ROLLBACK") ?? null;
 }
 
-// --- Accuracy parser for summary ---
-
 function parseAccuracy(reportContent: string): string {
-  const match = reportContent.match(
-    /\|\s*accuracy\s*\|\s*(.+?)\s*\|/
-  );
+  const match = reportContent.match(/\|\s*accuracy\s*\|\s*(.+?)\s*\|/);
   return match?.[1]?.trim() ?? "N/A";
 }
 
@@ -202,7 +144,7 @@ for (let i = 0; i < maxIterations; i++) {
   console.log(`[iteration ${i + 1}/${maxIterations}] Starting hypothesis ${hypId}`);
   console.log(`${"=".repeat(60)}\n`);
 
-  // Create hypothesis folder + SQLite row
+  // Create hypothesis folder
   const hypothesis = await createHypothesis({
     jobDir,
     id: hypId,
@@ -221,10 +163,10 @@ for (let i = 0; i < maxIterations; i++) {
     git("checkout", hypBranch);
   }
 
-  // Re-read MEMORY.md each iteration (Task 4)
+  // Re-read MEMORY.md each iteration
   const memoryMd = await readFile(join(jobDir, "MEMORY.md"), "utf-8");
 
-  // Build system prompt (Task 6) — EARS syntax + VERIFY checklist
+  // Build system prompt — EARS syntax + VERIFY checklist
   const systemPrompt = `You are an autonomous agent improver. You study a target agent's codebase, understand how it works, identify why evals fail, and implement fixes.
 
 ## How to work
@@ -269,7 +211,7 @@ ${jobMd}`;
 
   const userPrompt = `Run hypothesis ${hypId} (iteration ${i + 1}/${maxIterations}) for job "${jobId}". Analyze the failures, implement an improvement, run evals, and fill in the report.`;
 
-  // Spawn Claude Code (Task 7)
+  // Spawn Claude Code
   const exitCode = await runClaude(
     systemPrompt,
     userPrompt,
@@ -318,7 +260,7 @@ ${jobMd}`;
     git("checkout", bestBranch);
   }
 
-  // Print summary (Task 11)
+  // Print summary
   console.log(`\n${"—".repeat(60)}`);
   console.log(
     `[iteration ${i + 1}/${maxIterations}] Hypothesis ${hypId}: ${decision} | Accuracy: ${accuracy}`
