@@ -60,6 +60,27 @@ npm run run-job -- --id my-job
 
 The system will automatically run a baseline evaluation on the first run if one doesn't exist yet.
 
+### Try it with the demo agent
+
+To see auto-agent in action, you can use the [auto-agent-demo](https://github.com/alfonsograziano/auto-agent-demo) repo — a Mastra-based math agent with a golden dataset and eval suite ready to go.
+
+```bash
+# 1. Clone the demo repo alongside auto-agent
+git clone https://github.com/alfonsograziano/auto-agent-demo
+cd auto-agent-demo && npm install && cd ..
+
+# 2. Create a job pointing to the demo repo
+cd auto-agent
+npm run create-job -- --id math-demo
+
+# 3. Edit jobs/math-demo/JOB.md:
+#    - Set **Path** to the absolute path of auto-agent-demo
+#    - Under Scripts, set the eval command to `npm run experiment:math`
+
+# 4. Run the optimization loop
+npm run run-job -- --id math-demo
+```
+
 ## Scripts
 
 | Command | Description |
@@ -121,3 +142,11 @@ Each hypothesis runs on its own git branch created from the current best state. 
 - **Bounded execution** — configurable max iterations prevent runaway costs.
 - **Accumulated learning** — MEMORY.md prevents repeating mistakes across iterations and across runs.
 - **Zero dependencies** — only Node.js built-ins, keeping the orchestrator minimal and auditable.
+
+## Sponsors
+
+This project is sponsored by [NearForm](https://nearform.com/).
+
+## License
+
+[MIT](LICENSE)
