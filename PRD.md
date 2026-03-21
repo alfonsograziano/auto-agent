@@ -1,5 +1,7 @@
 # PRD: Self-Evolving Agent System
 
+> **Implementation status legend**: [DONE] = implemented and working, [PARTIAL] = partially implemented, [PLANNED] = not yet built.
+
 ## 1. Problem Statement
 
 Building and maintaining AI agents is a manual, iterative process: a developer writes code, runs evaluations, reads results, forms hypotheses, implements fixes, and repeats. This cycle is slow, expensive, and doesn't scale when the task surface grows (new question types, tighter latency requirements, cost constraints).
@@ -14,18 +16,39 @@ We need a system that **automates this entire loop** — given only a golden dat
 4. **Accumulated learning**: A shared memory persists across trials and loops, so the system doesn't repeat failed strategies or forget successful ones.
 5. **Bounded execution**: Each optimization loop has a configurable max number of trials to prevent runaway costs.
 
+## 2.1 Implementation Progress Summary
+
+| Capability | Status | Script / Module |
+|-----------|--------|-----------------|
+| Job scaffolding (folder, templates, SQLite) | [DONE] | `scripts/create-job.ts` |
+| Baseline eval runner | [DONE] | `scripts/run-baseline-evals.ts` |
+| Hypothesis creation (idempotent) | [DONE] | `utils/create-hypothesis.ts` |
+| Claude Code subprocess with streaming output | [DONE] | `run-baseline-evals.ts` (stream-json) |
+| Prompt engineering (EARS + VERIFY) | [DONE] | `.claude/skills/prompt-engineering/` |
+| SQLite schema (hypotheses, eval_runs, eval_cases) | [DONE] | `create-job.ts` |
+| Full optimization loop (`run-job`) | [PLANNED] | — |
+| Analyzer (failure categorization, hypothesis formulation) | [PLANNED] | — |
+| Hypothesis runner (implement → eval → accept/reject) | [PLANNED] | — |
+| Memory manager (MEMORY.md read/write + summarizer) | [PLANNED] | — |
+| Git manager (branch, merge, rollback) | [PARTIAL] | inline in `run-baseline-evals.ts` |
+| Constraint validation (forbidden files check) | [PLANNED] | — |
+| Reporter (per-hypothesis + final reports) | [PLANNED] | — |
+
 ## 3. System Architecture
 
-### 3.1 Two-Repository Structure
+### 3.1 Two-Repository Structure [DONE]
 
 ```
 ┌──────────────────────────────────────────────┐
 │   Orchestrator Repository (this repo)        │
 │   TypeScript CLI — auto-agent                │
 │                                              │
+│   scripts/               ← npm run scripts   │
+│   utils/                 ← shared utilities   │
+│   templates/             ← JOB + MEMORY       │
 │   jobs/                                      │
 │     <job-id>/          ← one folder per job  │
-│       job.md           ← objective, config   │
+│       JOB.md           ← objective, config   │
 │       MEMORY.md        ← shared learnings    │
 │       hypotheses/      ← one folder per try  │
 │       results.db       ← node:sqlite store   │
@@ -40,9 +63,9 @@ We need a system that **automates this entire loop** — given only a golden dat
 └──────────────────────────────────────────────┘
 ```
 
-**Orchestrator (this repo)**: TypeScript CLI. Controls the optimization loop, invokes the coding agent, runs evals, manages job artifacts and memory, produces reports. All job data (memory, hypotheses, reports) lives inside the `jobs/` folder of this repo.
+**Orchestrator (this repo)**: TypeScript CLI using `npm run` scripts. Controls the optimization loop, invokes the coding agent, runs evals, manages job artifacts and memory, produces reports. All job data (memory, hypotheses, reports) lives inside the `jobs/` folder of this repo. Uses Node.js 22+ with native TypeScript (type stripping), `node:sqlite`, and `node:util.parseArgs`.
 
-**Target Agent**: A separate Mastra-based TypeScript project. Contains the agent code, system prompt, tools, and the eval suite. The orchestrator points at this repo via a path in the job config. The coding agent modifies everything in the target repo *except* the files listed as forbidden in the job config.
+**Target Agent**: A separate Mastra-based TypeScript project. Contains the agent code, system prompt, tools, and the eval suite. The orchestrator points at this repo via a path in `JOB.md`. The coding agent modifies everything in the target repo *except* the files listed as forbidden in the job config.
 
 ### 3.2 Component Diagram
 
