@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 
 export interface CreateHypothesisOptions {
   jobDir: string;
@@ -29,13 +28,6 @@ export async function createHypothesis(
   }
 
   await mkdir(hypothesisDir, { recursive: true });
-
-  // Insert into SQLite
-  const db = new DatabaseSync(join(jobDir, "results.db"));
-  db.prepare(
-    `INSERT OR IGNORE INTO hypotheses (id, statement, status, branch_name) VALUES (?, ?, 'pending', ?)`
-  ).run(id, statement, branchName);
-  db.close();
 
   return { id, statement, branchName, dir: hypothesisDir };
 }

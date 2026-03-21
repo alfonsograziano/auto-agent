@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { spawn, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
 import { createHypothesis } from "../utils/create-hypothesis.ts";
 
 // --- CLI parsing (Task 1) ---
@@ -182,17 +181,7 @@ function parseAccuracy(reportContent: string): string {
   return match?.[1]?.trim() ?? "N/A";
 }
 
-// --- SQLite helper ---
-
-function updateHypothesisStatus(id: string, status: "accepted" | "rejected") {
-  const db = new DatabaseSync(join(jobDir, "results.db"));
-  db.prepare(
-    `UPDATE hypotheses SET status = ?, completed_at = datetime('now') WHERE id = ?`
-  ).run(status, id);
-  db.close();
-}
-
-// --- Main loop (Tasks 5, 6, 9, 10, 11) ---
+// --- Main loop ---
 
 let bestBranch = baselineBranch;
 const reportTemplatePath = join(projectRoot, "templates", "REPORT-TEMPLATE.md");
@@ -322,11 +311,9 @@ ${jobMd}`;
 
   // Handle decision
   if (decision === "CONTINUE") {
-    updateHypothesisStatus(hypId, "accepted");
     bestBranch = hypBranch;
     // Next iteration will branch from this accepted branch
   } else {
-    updateHypothesisStatus(hypId, "rejected");
     // Backtrack: return to the branch this hypothesis was created from
     git("checkout", bestBranch);
   }
