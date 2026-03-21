@@ -70,7 +70,7 @@ We need a system that **automates this entire loop** — given only a golden dat
 ### 3.2 Component Diagram
 
 ```
-Human triggers: npx auto-agent run --job <job-id>
+Human triggers: npm run run-job -- --id <job-id>
         │
         ▼
 ┌───────────────────────────────────────────────────┐
@@ -79,16 +79,16 @@ Human triggers: npx auto-agent run --job <job-id>
 │  ┌────────────┐  ┌────────────┐  ┌─────────────┐  │
 │  │ Job Loader │  │  Analyzer  │  │  Reporter    │  │
 │  │ (reads     │→ │ (reads     │  │ (produces    │  │
-│  │  job.md,   │  │  MEMORY.md │  │  per-hyp &   │  │
+│  │  JOB.md,   │  │  MEMORY.md │  │  per-hyp &   │  │
 │  │  creates   │  │  + evals,  │  │  final       │  │
 │  │  job dir)  │  │  forms     │  │  reports)    │  │
 │  └────────────┘  │  hypotheses│  └─────────────┘  │
-│                  └─────┬──────┘                    │
-│                        │                           │
+│   [DONE]         └─────┬──────┘   [PLANNED]       │
+│                        │ [PLANNED]                 │
 │                        ▼                           │
 │               ┌────────────────┐                   │
 │               │ Hypothesis     │                   │
-│               │ Runner         │                   │
+│               │ Runner         │ [PLANNED]         │
 │               │ (one per try)  │                   │
 │               └───────┬────────┘                   │
 │                       │                            │
@@ -99,9 +99,10 @@ Human triggers: npx auto-agent run --job <job-id>
 │     │  Agent   │ │ Runner │ │ Manager│            │
 │     │ (Claude  │ │ (runs  │ │ (R/W   │            │
 │     │  Code)   │ │ cmd    │ │ MEMORY │            │
-│     │          │ │ from   │ │ .md +  │            │
-│     │          │ │ job.md)│ │ sqlite)│            │
+│     │  via     │ │ from   │ │ .md +  │            │
+│     │  spawn)  │ │ JOB.md)│ │ sqlite)│            │
 │     └──────────┘ └────────┘ └────────┘            │
+│      [DONE]      [DONE]      [PLANNED]            │
 └───────────────────────────────────────────────────┘
 ```
 
@@ -136,9 +137,9 @@ A JSON file containing input/output pairs that define the target agent's expecte
 - **Immutable during a loop**: The dataset is read at loop start and not modified during execution.
 - **Progressive difficulty**: Items are ordered or tagged by difficulty so the system can prioritize low-hanging fruit first.
 
-### 4.2 Jobs
+### 4.2 Jobs [DONE]
 
-A job is a single optimization run against a target repo. The human creates a job by writing a `job.md` file (from a template) and then triggering the CLI. Each job gets its own folder under `jobs/<job-id>/` containing all artifacts.
+A job is a single optimization run against a target repo. The human creates a job by running `npm run create-job -- --id <job-id>`, which scaffolds a folder from templates (`JOB-TEMPLATE.md`, `MEMORY-TEMPLATE.md`) and initializes a SQLite database. The human then fills in `JOB.md` and triggers the optimization. Each job gets its own folder under `jobs/<job-id>/` containing all artifacts.
 
 ### 4.3 Hypotheses
 
