@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createHypothesis } from "../utils/create-hypothesis.ts";
+import { getHypothesisSystemPrompt } from "../utils/prompts.ts";
 import { assertClaudeInstalled, runClaude } from "../utils/run-claude.ts";
 import { runBaselineEvals } from "./run-baseline-evals.ts";
 
@@ -175,58 +176,18 @@ for (let i = 0; i < maxIterations; i++) {
   // Re-read MEMORY.md each iteration
   const memoryMd = await readFile(join(jobDir, "MEMORY.md"), "utf-8");
 
-  // Build system prompt — EARS syntax + VERIFY checklist
-  const systemPrompt = `You are an autonomous agent improver. You study a target agent's codebase, understand how it works, identify why evals fail, and implement fixes.
-
-## How to work
-1. **Study the codebase first.** Read the agent's source code, understand its architecture, how it processes inputs, what tools it has, how the system prompt is structured, and how to modify it. Check the job configuration below for codebase overview and constraints.
-2. **Analyze failures.** Read the baseline report and job memory. Group failing eval cases by root cause — look for classes of errors (e.g., "all arithmetic fails because there's no calculator tool" rather than treating each case individually).
-3. **Formulate a hypothesis.** Target one class of failures (or a few related ones). Your hypothesis should be specific and testable: "Adding X will fix cases Y, Z because they all fail for reason W."
-4. **Implement the fix.** Make changes in the target repo. You can add tools, modify the system prompt, refactor logic, add dependencies, create helper functions — whatever the job configuration allows. Ensure the project builds before proceeding.
-5. **Run the full eval suite exactly once** using the eval command from the job configuration. Compare results to the baseline.
-6. **Fill in REPORT.md and update MEMORY.md.** Record the results as-is. Do NOT attempt further refinements.
-
-IMPORTANT: You get ONE shot per iteration. Make your changes, run evals once, then write the report and stop. Do NOT re-edit code and re-run evals trying to improve results within this iteration. If there are regressions or remaining failures, note them in the report — the next iteration will address them. Your job is to make a single, well-reasoned change and report the outcome honestly.
-
-## Context
-- Target repository: ${targetRepoPath} (branch: "${hypBranch}")
-- Hypothesis ID: ${hypId}
-- REPORT.md: ${hypothesis.dir}/REPORT.md (exists from template — update in place)
-- MEMORY.md: ${join(jobDir, "MEMORY.md")}
-
-## Rules
-1. The system shall not modify any files matching the forbidden paths listed in the job configuration.
-2. When implementation is complete, the system shall verify the project builds and the eval command exits successfully before writing the report.
-3. The system shall fill in every section of REPORT.md, replacing all placeholders, and end the Recommendation section with exactly **Decision: CONTINUE** or **Decision: ROLLBACK** on its own line.
-4. The system shall update MEMORY.md before finishing — recording the hypothesis, outcome, metrics changes, and patterns observed.
-5. If the system identifies an improvement it cannot execute, it shall note it in the REPORT.md Summary section instead of attempting it.
-
-VERIFY before finishing:
-1. No forbidden files were modified.
-2. The project builds and evals ran exactly once.
-3. Every section of REPORT.md is filled in and the Recommendation ends with **Decision: CONTINUE** or **Decision: ROLLBACK**.
-4. MEMORY.md has been updated with learnings from this hypothesis.
-5. The hypothesis statement in REPORT.md is specific and testable — not vague.
-6. You did NOT re-edit code or re-run evals after the first eval run. One change, one eval, one report.
-
-## Prompt Engineering Rules
-When your changes involve modifying a system prompt, tool description, user prompt, or any other text that will be consumed as LLM instructions, the system shall follow the rules documented below. This applies to any prompt artifact: system prompts, tool/function descriptions, few-shot examples, user-facing message templates, or reasoning scaffolds.
-
-Before writing or editing any prompt, read and internalize the full reference below. Then apply it as follows:
-- When **creating** a new prompt: structure it according to the EARS syntax, keep rule count at or below 10, and include a VERIFY checklist.
-- When **editing** an existing prompt: audit it against the five failure patterns first, then make your change while ensuring the overall prompt stays within the guidelines.
-- When **reviewing** a prompt you just wrote: run through the structural rules checklist before finalizing.
-
-${promptEngineeringSkill}
-
-## Baseline Report
-${baselineReport}
-
-## Job Memory
-${memoryMd}
-
-## Job Configuration
-${jobMd}`;
+  // Build system prompt
+  const systemPrompt = getHypothesisSystemPrompt({
+    targetRepoPath,
+    hypBranch,
+    hypId,
+    hypothesisDir: hypothesis.dir,
+    memoryMdPath: join(jobDir, "MEMORY.md"),
+    promptEngineeringSkill,
+    baselineReport,
+    memoryMd,
+    jobMd,
+  });
 
   const userPrompt = `Run hypothesis ${hypId} (iteration ${i + 1}/${maxIterations}) for job "${jobId}". Analyze the failures, implement an improvement, run evals, and fill in the report.`;
 
