@@ -205,6 +205,7 @@ for (let i = 0; i < maxIterations; i++) {
     hypBranch,
     hypId,
     hypothesisDir: hypothesis.dir,
+    hypothesesRootDir: join(jobDir, "hypotheses"),
     memoryMdPath: join(jobDir, "MEMORY.md"),
     promptEngineeringSkill,
     baselineReport,

@@ -49,6 +49,7 @@ export interface HypothesisSystemPromptParams {
   hypBranch: string;
   hypId: string;
   hypothesisDir: string;
+  hypothesesRootDir: string;
   memoryMdPath: string;
   promptEngineeringSkill: string;
   baselineReport: string;
@@ -62,6 +63,7 @@ export function getHypothesisSystemPrompt(params: HypothesisSystemPromptParams):
     hypBranch,
     hypId,
     hypothesisDir,
+    hypothesesRootDir,
     memoryMdPath,
     promptEngineeringSkill,
     baselineReport,
@@ -73,17 +75,19 @@ export function getHypothesisSystemPrompt(params: HypothesisSystemPromptParams):
 
 ## How to work
 1. **Study the codebase first.** Read the agent's source code, understand its architecture, how it processes inputs, what tools it has, how the system prompt is structured, and how to modify it. Check the job configuration below for codebase overview and constraints.
-2. **Analyze failures.** Read the baseline report and job memory. Group failing eval cases by root cause — look for classes of errors (e.g., "all arithmetic fails because there's no calculator tool" rather than treating each case individually).
-3. **Formulate a hypothesis.** Target one class of failures (or a few related ones). Your hypothesis should be specific and testable: "Adding X will fix cases Y, Z because they all fail for reason W."
-4. **Implement the fix.** Make changes in the target repo. You can add tools, modify the system prompt, refactor logic, add dependencies, create helper functions — whatever the job configuration allows. Ensure the project builds before proceeding.
-5. **Run the full eval suite exactly once** using the eval command from the job configuration. Compare results to the baseline.
-6. **Fill in REPORT.md and update MEMORY.md.** Record the results as-is. Do NOT attempt further refinements.
+2. **Review previous experiments.** The Job Memory section below contains a running summary of all hypotheses tried so far. Use it to understand the full experiment history. Then read the REPORT.md files from the **last 3 iterations** in the hypotheses folder at \`${hypothesesRootDir}\` for recent detail. If you need more context about an older hypothesis, you can read its REPORT.md on demand — but do not read all reports upfront. You must understand the experiment history before proposing anything new.
+3. **Analyze remaining failures.** Based on the latest accepted state (the most recent CONTINUE report, or baseline if none), group the still-failing eval cases by root cause — look for classes of errors (e.g., "all arithmetic fails because there's no calculator tool" rather than treating each case individually). Identify and list all distinct remaining failure classes before deciding which one to tackle.
+4. **Pick ONE failure class to tackle.** Each iteration must target exactly one failure class (or a small group of tightly related failures sharing the same root cause). Do NOT try to fix multiple unrelated failure classes in a single iteration — even if the fixes seem simple. Do NOT repeat a hypothesis that was already tried and rolled back — check the experiment history. Tackling one class at a time makes it possible to measure impact, attribute regressions, and build reliable learnings. Your hypothesis should be specific and testable: "Adding X will fix cases Y, Z because they all fail for reason W."
+5. **Implement the fix.** Make changes in the target repo scoped to the chosen failure class. You can add tools, modify the system prompt, refactor logic, add dependencies, create helper functions — whatever the job configuration allows. Do not sneak in unrelated improvements. Ensure the project builds before proceeding.
+6. **Run the full eval suite exactly once** using the eval command from the job configuration. Compare results to the latest accepted state.
+7. **Fill in REPORT.md and update MEMORY.md.** Record the results as-is. Do NOT attempt further refinements.
 
-IMPORTANT: You get ONE shot per iteration. Make your changes, run evals once, then write the report and stop. Do NOT re-edit code and re-run evals trying to improve results within this iteration. If there are regressions or remaining failures, note them in the report — the next iteration will address them. Your job is to make a single, well-reasoned change and report the outcome honestly.
+IMPORTANT: You get ONE shot per iteration targeting ONE failure class. Make your changes, run evals once, then write the report and stop. Do NOT re-edit code and re-run evals trying to improve results within this iteration. Do NOT fix multiple unrelated failure classes in the same iteration — leave them for subsequent iterations. If there are regressions or remaining failures, note them in the report — the next iteration will address them. Your job is to make a single, well-reasoned change addressing a single failure class, and report the outcome honestly.
 
 ## Context
 - Target repository: ${targetRepoPath} (branch: "${hypBranch}")
 - Hypothesis ID: ${hypId}
+- Hypotheses folder: ${hypothesesRootDir} (contains all past experiment folders — read their REPORT.md files)
 - REPORT.md: ${hypothesisDir}/REPORT.md (exists from template — update in place)
 - MEMORY.md: ${memoryMdPath}
 
@@ -100,7 +104,8 @@ VERIFY before finishing:
 3. Every section of REPORT.md is filled in and the Recommendation ends with **Decision: CONTINUE** or **Decision: ROLLBACK**.
 4. MEMORY.md has been updated with learnings from this hypothesis.
 5. The hypothesis statement in REPORT.md is specific and testable — not vague.
-6. You did NOT re-edit code or re-run evals after the first eval run. One change, one eval, one report.
+6. You did NOT re-edit code or re-run evals after the first eval run. One failure class, one change, one eval, one report.
+7. Your changes target exactly one failure class — you did NOT sneak in fixes for unrelated failure classes.
 
 ## Prompt Engineering Rules
 When your changes involve modifying a system prompt, tool description, user prompt, or any other text that will be consumed as LLM instructions, the system shall follow the rules documented below. This applies to any prompt artifact: system prompts, tool/function descriptions, few-shot examples, user-facing message templates, or reasoning scaffolds.
