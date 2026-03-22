@@ -1,5 +1,5 @@
 import { parseArgs, styleText } from "node:util";
-import { readFile, copyFile } from "node:fs/promises";
+import { readFile, copyFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -129,15 +129,12 @@ const baselineReport = await readFile(baselineReportPath, "utf-8");
 const promptEngineeringPath = join(projectRoot, ".claude", "skills", "prompt-engineering", "SKILL.md");
 const promptEngineeringSkill = await readFile(promptEngineeringPath, "utf-8");
 
-// --- Ensure we're on the baseline branch ---
+// --- Ensure we're on the baseline branch (will switch to bestBranch after resume detection) ---
 
-const currentBranch = git("rev-parse", "--abbrev-ref", "HEAD");
-if (currentBranch !== baselineBranch) {
-  try {
-    git("checkout", baselineBranch);
-  } catch {
-    git("checkout", baseBranch);
-  }
+try {
+  git("checkout", baselineBranch);
+} catch {
+  git("checkout", baseBranch);
 }
 
 // --- Helpers ---
@@ -154,23 +151,74 @@ function parseAccuracy(reportContent: string): string {
   return match?.[1]?.trim() ?? "N/A";
 }
 
-// --- Main loop ---
+// --- Detect existing hypotheses and resume from where we left off ---
 
 let bestBranch = baselineBranch;
 const reportTemplatePath = join(projectRoot, "templates", "REPORT-TEMPLATE.md");
 const iterationTimings: { id: string; duration: number; decision: string; accuracy: string }[] = [];
 
+const hypothesesDir = join(jobDir, "hypotheses");
+const existingHypDirs = (await readdir(hypothesesDir, { withFileTypes: true }))
+  .filter((d) => d.isDirectory() && /^\d{3}-[a-f0-9]{6}$/.test(d.name))
+  .map((d) => d.name)
+  .sort();
+
+let startIndex = 0;
+
+if (existingHypDirs.length > 0) {
+  console.log(styleText("bold", `Resuming job — found ${existingHypDirs.length} existing hypothesis(es)`));
+  console.log("");
+
+  // Replay decisions to reconstruct bestBranch
+  for (const hypDirName of existingHypDirs) {
+    const existingReportPath = join(hypothesesDir, hypDirName, "REPORT.md");
+    if (!existsSync(existingReportPath)) continue;
+
+    const existingReport = await readFile(existingReportPath, "utf-8");
+    const decision = parseDecision(existingReport);
+    const accuracy = parseAccuracy(existingReport);
+
+    if (!decision) continue; // Skip incomplete hypotheses
+
+    const existingHypBranch = `${jobId}-hyp-${hypDirName}`;
+
+    if (decision === "CONTINUE") {
+      bestBranch = existingHypBranch;
+    }
+
+    iterationTimings.push({ id: hypDirName, duration: 0, decision, accuracy });
+
+    console.log(
+      `  ${styleText("dim", "↩")} ${hypDirName}: ${styleText(decision === "CONTINUE" ? "green" : "red", decision)} | Accuracy: ${styleText("yellow", accuracy)}`
+    );
+  }
+
+  startIndex = existingHypDirs.length;
+  const lastSeq = parseInt(existingHypDirs[existingHypDirs.length - 1].slice(0, 3), 10);
+  startIndex = lastSeq; // Use the actual last sequence number to continue from
+
+  console.log(`\n  Best branch so far: ${styleText("cyan", bestBranch)}`);
+  console.log(`  Resuming from iteration ${startIndex + 1}`);
+  console.log("");
+}
+
+// Checkout the best branch before starting (baseline or last CONTINUE branch)
+if (bestBranch !== baselineBranch) {
+  git("checkout", bestBranch);
+}
+
 console.log(styleText("bold", "Starting optimization loop"));
 console.log("");
 
 for (let i = 0; i < maxIterations; i++) {
-  const seq = String(i + 1).padStart(3, "0");
+  const seq = String(startIndex + i + 1).padStart(3, "0");
   const hexId = randomBytes(3).toString("hex");
   const hypId = `${seq}-${hexId}`;
   const hypBranch = `${jobId}-hyp-${hypId}`;
 
+  const globalIteration = startIndex + i + 1;
   console.log(`\n${styleText("cyan", "=".repeat(60))}`);
-  console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("bold", `Iteration ${i + 1}/${maxIterations}`)} — Hypothesis ${styleText("yellow", hypId)}`);
+  console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("bold", `Iteration ${globalIteration} (${i + 1}/${maxIterations} new)`)} — Hypothesis ${styleText("yellow", hypId)}`);
   console.log(`${styleText("cyan", "=".repeat(60))}\n`);
 
   const iterationStart = Date.now();
@@ -213,7 +261,7 @@ for (let i = 0; i < maxIterations; i++) {
     jobMd,
   });
 
-  const userPrompt = `Run hypothesis ${hypId} (iteration ${i + 1}/${maxIterations}) for job "${jobId}". Analyze the failures, implement an improvement, run evals, and fill in the report.`;
+  const userPrompt = `Run hypothesis ${hypId} (iteration ${globalIteration}) for job "${jobId}". Analyze the failures, implement an improvement, run evals, and fill in the report.`;
 
   // Spawn Claude Code
   console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("bold", "  Agent running...")}`);
@@ -292,8 +340,9 @@ console.log(`  ${styleText("dim", "─".repeat(56))}`);
 for (let i = 0; i < iterationTimings.length; i++) {
   const t = iterationTimings[i];
   const decColor = t.decision === "CONTINUE" ? "green" : "red";
+  const durationStr = t.duration === 0 ? "(resumed)" : formatDuration(t.duration);
   console.log(
-    `  ${String(i + 1).padEnd(4)} ${t.id.padEnd(14)} ${styleText(decColor, t.decision.padEnd(12))} ${t.accuracy.padEnd(12)} ${formatDuration(t.duration)}`
+    `  ${String(i + 1).padEnd(4)} ${t.id.padEnd(14)} ${styleText(decColor, t.decision.padEnd(12))} ${t.accuracy.padEnd(12)} ${durationStr}`
   );
 }
 console.log("");
