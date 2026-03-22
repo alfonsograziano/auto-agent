@@ -154,7 +154,7 @@ Each hypothesis runs on its own git branch created from the current best state. 
 
 ## Sponsors
 
-This project is sponsored by [NearForm](https://nearform.com/).
+This project is sponsored by [Nearform](https://nearform.com/).
 
 ## License
 
