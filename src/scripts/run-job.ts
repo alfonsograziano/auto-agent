@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createHypothesis } from "../utils/create-hypothesis.ts";
+import { initLogger, closeLogger, formatDuration, formatTimestamp } from "../utils/logger.ts";
 import { getHypothesisSystemPrompt } from "../utils/prompts.ts";
 import { assertClaudeInstalled, runClaude } from "../utils/run-claude.ts";
 import { runBaselineEvals } from "./run-baseline-evals.ts";
@@ -41,6 +42,20 @@ if (!existsSync(jobDir)) {
   process.exit(1);
 }
 
+// --- Init logger (tees stdout/stderr to out.log.txt) ---
+
+initLogger(jobDir);
+
+const jobStartTime = Date.now();
+
+console.log(styleText("bold", `\n🔬 Auto-Agent — Job "${jobId}"`));
+console.log(styleText("dim", "─".repeat(60)));
+console.log(`  Job dir:        ${styleText("cyan", jobDir)}`);
+console.log(`  Max iterations: ${styleText("cyan", String(maxIterations))}`);
+console.log(`  Started at:     ${styleText("cyan", new Date().toISOString())}`);
+console.log(styleText("dim", "─".repeat(60)));
+console.log("");
+
 // --- Load JOB.md ---
 
 const jobMdPath = join(jobDir, "JOB.md");
@@ -65,6 +80,10 @@ if (!existsSync(targetRepoPath)) {
   process.exit(1);
 }
 
+console.log(`  Target repo:    ${styleText("cyan", targetRepoPath)}`);
+console.log(`  Base branch:    ${styleText("cyan", baseBranch)}`);
+console.log("");
+
 // --- Git helper ---
 
 function git(...args: string[]): string {
@@ -80,7 +99,8 @@ const baselineDir = join(jobDir, "hypotheses", "000-baseline");
 const baselineBranch = `${jobId}-baseline`;
 
 if (!existsSync(baselineDir)) {
-  console.log(styleText("yellow", "Baseline not found. Running baseline evals...\n"));
+  console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("bold", "Running baseline evals...")}`);
+  const baselineStart = Date.now();
   await runBaselineEvals({
     jobId,
     jobDir,
@@ -89,7 +109,8 @@ if (!existsSync(baselineDir)) {
     baseBranch,
     projectRoot,
   });
-  console.log();
+  console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("green", "✓")} Baseline evals ${styleText("dim", `(${formatDuration(Date.now() - baselineStart)})`)}`);
+  console.log("");
 }
 
 // --- Read baseline REPORT.md (read once, constant across iterations) ---
@@ -137,12 +158,10 @@ function parseAccuracy(reportContent: string): string {
 
 let bestBranch = baselineBranch;
 const reportTemplatePath = join(projectRoot, "templates", "REPORT-TEMPLATE.md");
+const iterationTimings: { id: string; duration: number; decision: string; accuracy: string }[] = [];
 
-console.log(styleText("bold", `Starting optimization loop for job "${jobId}"`));
-console.log(`  Max iterations: ${styleText("cyan", String(maxIterations))}`);
-console.log(`  Target repo:    ${styleText("cyan", targetRepoPath)}`);
-console.log(`  Best branch:    ${styleText("cyan", bestBranch)}`);
-console.log();
+console.log(styleText("bold", "Starting optimization loop"));
+console.log("");
 
 for (let i = 0; i < maxIterations; i++) {
   const seq = String(i + 1).padStart(3, "0");
@@ -151,8 +170,10 @@ for (let i = 0; i < maxIterations; i++) {
   const hypBranch = `${jobId}-hyp-${hypId}`;
 
   console.log(`\n${styleText("cyan", "=".repeat(60))}`);
-  console.log(styleText("bold", `[iteration ${i + 1}/${maxIterations}] Starting hypothesis ${hypId}`));
+  console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("bold", `Iteration ${i + 1}/${maxIterations}`)} — Hypothesis ${styleText("yellow", hypId)}`);
   console.log(`${styleText("cyan", "=".repeat(60))}\n`);
+
+  const iterationStart = Date.now();
 
   // Create hypothesis folder
   const hypothesis = await createHypothesis({
@@ -173,6 +194,8 @@ for (let i = 0; i < maxIterations; i++) {
     git("checkout", hypBranch);
   }
 
+  console.log(`  Branch: ${styleText("cyan", hypBranch)} (from ${styleText("dim", bestBranch)})`);
+
   // Re-read MEMORY.md each iteration
   const memoryMd = await readFile(join(jobDir, "MEMORY.md"), "utf-8");
 
@@ -192,12 +215,15 @@ for (let i = 0; i < maxIterations; i++) {
   const userPrompt = `Run hypothesis ${hypId} (iteration ${i + 1}/${maxIterations}) for job "${jobId}". Analyze the failures, implement an improvement, run evals, and fill in the report.`;
 
   // Spawn Claude Code
+  console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("bold", "  Agent running...")}`);
+  const agentStart = Date.now();
   const exitCode = await runClaude(
     systemPrompt,
     userPrompt,
     targetRepoPath,
     jobDir
   );
+  console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("green", "✓")} Agent ${styleText("dim", `(${formatDuration(Date.now() - agentStart)})`)}`);
 
   // Parse decision from REPORT.md
   const reportPath = join(hypothesis.dir, "REPORT.md");
@@ -234,22 +260,46 @@ for (let i = 0; i < maxIterations; i++) {
   // Handle decision
   if (decision === "CONTINUE") {
     bestBranch = hypBranch;
-    // Next iteration will branch from this accepted branch
   } else {
-    // Backtrack: return to the branch this hypothesis was created from
     git("checkout", bestBranch);
   }
 
-  // Print summary
+  const iterationDuration = Date.now() - iterationStart;
+  iterationTimings.push({ id: hypId, duration: iterationDuration, decision, accuracy });
+
+  // Print iteration summary
   const decisionColor = decision === "CONTINUE" ? "green" : "red";
-  console.log(`\n${styleText("cyan", "—".repeat(60))}`);
+  console.log(`\n${styleText("dim", "─".repeat(60))}`);
   console.log(
-    `${styleText("bold", `[iteration ${i + 1}/${maxIterations}]`)} Hypothesis ${hypId}: ${styleText(decisionColor, decision)} | Accuracy: ${styleText("yellow", accuracy)}`
+    `  ${styleText("bold", `Result:`)} ${styleText(decisionColor, decision)} | Accuracy: ${styleText("yellow", accuracy)} | Duration: ${styleText("dim", formatDuration(iterationDuration))}`
   );
-  console.log(`Best branch: ${styleText("cyan", bestBranch)}`);
-  console.log(`${styleText("cyan", "—".repeat(60))}\n`);
+  console.log(`  Best branch: ${styleText("cyan", bestBranch)}`);
+  console.log(`${styleText("dim", "─".repeat(60))}`);
 }
 
-console.log(styleText("green", "\nOptimization loop complete."));
-console.log(`Final best branch: ${styleText("bold", bestBranch)}`);
-console.log(`Job artifacts:     ${styleText("cyan", jobDir)}`);
+// --- Final summary ---
+
+const totalDuration = Date.now() - jobStartTime;
+
+console.log(`\n${styleText("green", "=".repeat(60))}`);
+console.log(styleText("bold", "  Job complete"));
+console.log(`${styleText("green", "=".repeat(60))}\n`);
+
+console.log(styleText("bold", "  Iteration Summary:"));
+console.log(`  ${"#".padEnd(4)} ${"Hypothesis".padEnd(14)} ${"Decision".padEnd(12)} ${"Accuracy".padEnd(12)} Duration`);
+console.log(`  ${styleText("dim", "─".repeat(56))}`);
+for (let i = 0; i < iterationTimings.length; i++) {
+  const t = iterationTimings[i];
+  const decColor = t.decision === "CONTINUE" ? "green" : "red";
+  console.log(
+    `  ${String(i + 1).padEnd(4)} ${t.id.padEnd(14)} ${styleText(decColor, t.decision.padEnd(12))} ${t.accuracy.padEnd(12)} ${formatDuration(t.duration)}`
+  );
+}
+console.log("");
+console.log(`  Total time:      ${styleText("bold", formatDuration(totalDuration))}`);
+console.log(`  Final branch:    ${styleText("bold", bestBranch)}`);
+console.log(`  Job artifacts:   ${styleText("cyan", jobDir)}`);
+console.log(`  Full log:        ${styleText("cyan", join(jobDir, "out.log.txt"))}`);
+console.log("");
+
+closeLogger();
