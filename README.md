@@ -97,6 +97,8 @@ npm run run-job -- --id math-demo
 | `npm run create-job -- --id <job-id>` | Scaffold a new job folder with templates |
 | `npm run run-job -- --id <job-id>` | Run the full optimization loop |
 | `npm run run-job -- --id <job-id> --max-iterations 10` | Run with a custom iteration limit (default: 5) |
+| `npm run generate-changelog -- --job <job-id>` | Generate a CHANGELOG.md summarizing all changes after a job run |
+| `npm run generate-changelog -- --job <job-id> --branch <branch>` | Generate changelog using a specific branch as the final state |
 
 
 ## Configuring a Job
@@ -142,6 +144,10 @@ The orchestrator parses this decision to determine whether to keep the hypothesi
 ### Git Branching
 
 Each hypothesis runs on its own git branch created from the current best state. If a hypothesis is accepted (`CONTINUE`), its branch becomes the new best. If rejected (`ROLLBACK`), the orchestrator checks out the previous best branch. This ensures safe, reversible iteration.
+
+### CHANGELOG.md
+
+After a job completes, run `npm run generate-changelog -- --job <job-id>` to generate a summary of all changes. The changelog breaks down the cumulative diff into per-hypothesis sections — each with the problem it solved, accuracy impact, and the actual code diff inline. Rolled-back hypotheses are documented as short paragraphs explaining what was tried and why it failed. A cherry-pick guide lists accepted branches in order (with a caveat that branches build incrementally, so cherry-picking may not apply cleanly).
 
 
 ## Design Principles

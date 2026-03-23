@@ -351,5 +351,10 @@ console.log(`  Final branch:    ${styleText("bold", bestBranch)}`);
 console.log(`  Job artifacts:   ${styleText("cyan", jobDir)}`);
 console.log(`  Full log:        ${styleText("cyan", join(jobDir, "out.log.txt"))}`);
 console.log("");
+console.log(styleText("dim", "─".repeat(60)));
+console.log(`  ${styleText("bold", "Next step:")} Generate a changelog to review all changes:`);
+console.log(`  ${styleText("yellow", `npm run generate-changelog -- --job ${jobId} --branch ${bestBranch}`)}`);
+console.log(styleText("dim", "─".repeat(60)));
+console.log("");
 
 closeLogger();
