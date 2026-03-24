@@ -4,15 +4,11 @@ import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
-import { assertClaudeInstalled, runClaude } from "../utils/run-claude.ts";
+import { createProvider, type ProviderName } from "../utils/providers/index.ts";
 import {
   getChangelogSystemPrompt,
   type HypothesisMeta,
 } from "../utils/prompts.ts";
-
-// --- Preflight ---
-
-assertClaudeInstalled();
 
 // --- CLI parsing ---
 
@@ -47,6 +43,10 @@ const jobMd = await readFile(jobMdPath, "utf-8");
 
 const pathMatch = jobMd.match(/\*\*Path\*\*:\s*(.+)/);
 const branchMatch = jobMd.match(/\*\*Branch\*\*:\s*(.+)/);
+const providerMatch = jobMd.match(/\*\*Provider\*\*:\s*(.+)/);
+const providerName = (providerMatch?.[1]?.trim().toLowerCase() ?? "claude") as ProviderName;
+const provider = createProvider(providerName);
+provider.assertInstalled();
 
 if (!pathMatch || !branchMatch) {
   console.error(
@@ -176,8 +176,8 @@ for (const dirName of hypDirNames) {
   hypotheses.push({ id: dirName, branch, decision, accuracy });
 }
 
-// --- Build prompt and invoke Claude ---
-// Claude Code will read the actual files and compute diffs itself
+// --- Build prompt and invoke agent ---
+// The agent will read the actual files and compute diffs itself
 
 const changelogPath = join(jobDir, "CHANGELOG.md");
 
@@ -195,12 +195,19 @@ const systemPrompt = getChangelogSystemPrompt({
 
 const userPrompt = `Generate the CHANGELOG.md for job "${jobId}". Write it to ${changelogPath}. Be concise — the reader will refer to individual REPORT.md files for details.`;
 
-console.log(`${styleText("bold", "  Generating changelog with Claude...")}\n`);
+console.log(`${styleText("bold", `  Generating changelog with ${providerName}...`)}\n`);
 
-const exitCode = await runClaude(systemPrompt, userPrompt, targetRepoPath, jobDir);
+const exitCode = await provider.run({
+  systemPrompt,
+  userPrompt,
+  cwd: targetRepoPath,
+  addDir: jobDir,
+});
+
+await provider.cleanup?.();
 
 if (exitCode !== 0) {
-  console.error(styleText("red", `\nClaude Code exited with code ${exitCode}.`));
+  console.error(styleText("red", `\n${providerName} exited with code ${exitCode}.`));
   process.exit(1);
 }
 
