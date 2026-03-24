@@ -17,6 +17,12 @@
 - **Path**: ../target-agent
 - **Branch**: main
 
+## Provider
+
+<!-- Which CLI agent backend to use: "claude" (default) or "kiro" -->
+
+- **Provider**: claude
+
 ## Metrics
 
 <!-- Which metric should the system optimize, and what guardrails apply to other metrics?

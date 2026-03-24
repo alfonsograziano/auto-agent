@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { styleText } from "node:util";
 import { createHypothesis } from "../utils/create-hypothesis.ts";
 import { getBaselineSystemPrompt } from "../utils/prompts.ts";
-import { runClaude } from "../utils/run-claude.ts";
+import type { AgentProvider } from "../utils/providers/index.ts";
 
 interface RunBaselineOptions {
   jobId: string;
@@ -13,10 +13,11 @@ interface RunBaselineOptions {
   targetRepoPath: string;
   baseBranch: string;
   projectRoot: string;
+  provider: AgentProvider;
 }
 
 export async function runBaselineEvals(options: RunBaselineOptions) {
-  const { jobId, jobDir, jobMd, targetRepoPath, baseBranch, projectRoot } =
+  const { jobId, jobDir, jobMd, targetRepoPath, baseBranch, projectRoot, provider } =
     options;
 
   const baselineBranch = `${jobId}-baseline`;
@@ -55,7 +56,7 @@ export async function runBaselineEvals(options: RunBaselineOptions) {
   await copyFile(reportTemplatePath, join(hypothesis.dir, "REPORT.md"));
 
   console.log(`Created baseline hypothesis: ${styleText("cyan", hypothesis.dir)}`);
-  console.log(styleText("bold", "Spawning Claude Code to run baseline evals..."));
+  console.log(styleText("bold", `Spawning ${provider.name} agent to run baseline evals...`));
   console.log();
 
   const systemPrompt = getBaselineSystemPrompt({
@@ -67,15 +68,15 @@ export async function runBaselineEvals(options: RunBaselineOptions) {
 
   const userPrompt = `Run the baseline evals for job "${jobId}" and write the report.`;
 
-  const exitCode = await runClaude(
+  const exitCode = await provider.run({
     systemPrompt,
     userPrompt,
-    targetRepoPath,
-    jobDir
-  );
+    cwd: targetRepoPath,
+    addDir: jobDir,
+  });
 
   if (exitCode !== 0) {
-    console.error(styleText("red", `Claude Code exited with code ${exitCode}`));
+    console.error(styleText("red", `Agent exited with code ${exitCode}`));
     process.exit(exitCode);
   }
 

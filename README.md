@@ -14,7 +14,7 @@ A self-evolving agent optimization system that autonomously improves a target AI
 auto-agent uses a **two-repository architecture**:
 
 - **Orchestrator** (this repo) — controls the optimization loop, manages git branches, injects context, and tracks decisions.
-- **Target agent** (separate repo) — the agent being improved. The orchestrator spawns [Claude Code](https://docs.anthropic.com/en/docs/claude-code) inside this repo to analyze and modify its code.
+- **Target agent** (separate repo) — the agent being improved. The orchestrator spawns a coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Kiro CLI](https://kiro.dev/cli/)) inside this repo to analyze and modify its code.
 
 
 
@@ -23,8 +23,8 @@ auto-agent uses a **two-repository architecture**:
 ```mermaid
 flowchart TD
     A[Read baseline report + MEMORY.md + JOB.md] --> B[Create git branch for new hypothesis]
-    B --> C[Spawn Claude Code in target repo with full context]
-    C --> D[Claude: analyze failures → implement fix → run eval]
+    B --> C[Spawn coding agent in target repo with full context]
+    C --> D[Agent: analyze failures → implement fix → run eval]
     D --> E[Parse decision from REPORT.md]
     E --> F{Decision?}
     F -->|CONTINUE| G[Keep hypothesis branch as new best]
@@ -35,20 +35,36 @@ flowchart TD
     I -->|Yes| J[Done]
 ```
 
-Each iteration produces a **hypothesis** — a single attempt at improvement. Claude Code receives:
+Each iteration produces a **hypothesis** — a single attempt at improvement. The coding agent receives:
 
 - The **baseline evaluation report** (constant reference point)
 - **MEMORY.md** (accumulated learnings from all prior hypotheses)
 - **JOB.md** (objective, constraints, forbidden files, codebase overview)
 
-After implementing changes and running evals, Claude fills a **REPORT.md** with metrics and a decision: `CONTINUE` (accept) or `ROLLBACK` (reject). Accepted hypotheses become the new baseline for the next iteration.
+After implementing changes and running evals, the agent fills a **REPORT.md** with metrics and a decision: `CONTINUE` (accept) or `ROLLBACK` (reject). Accepted hypotheses become the new baseline for the next iteration.
 
 ## Prerequisites
 
 - **Node.js 22+**
-- **Claude Code CLI** installed and authenticated
+- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** or **[Kiro CLI](https://kiro.dev/cli/)** installed and authenticated
 - **Git** available on PATH
 - A **target agent repository** with an eval command that outputs JSON
+
+## Providers
+
+auto-agent supports multiple coding agent backends via a provider abstraction:
+
+| Provider | CLI | Flag |
+|----------|-----|------|
+| Claude Code | `claude` | `--provider claude` (default) |
+| Kiro CLI | `kiro-cli` | `--provider kiro` |
+
+Set the provider in your `JOB.md` under `## Provider`:
+
+```markdown
+## Provider
+- **Provider**: kiro
+```
 
 ## Quick Start
 
@@ -99,6 +115,7 @@ npm run run-job -- --id math-demo
 | `npm run run-job -- --id <job-id> --max-iterations 10` | Run with a custom iteration limit (default: 5) |
 | `npm run generate-changelog -- --job <job-id>` | Generate a CHANGELOG.md summarizing all changes after a job run |
 | `npm run generate-changelog -- --job <job-id> --branch <branch>` | Generate changelog using a specific branch as the final state |
+| `npm run run-benchmark -- --benchmark <name> --provider <provider>` | Run a benchmark suite against a provider |
 
 
 ## Configuring a Job
@@ -111,16 +128,16 @@ After running `create-job`, edit `jobs/<job-id>/JOB.md` to configure:
 | **Target Repository** | Absolute path and starting branch of the agent repo |
 | **Metrics** | Primary metric to optimize + secondary constraints (regression thresholds) |
 | **Scripts** | Install, build, eval, and test commands to run in the target repo |
-| **Forbidden Files** | Glob patterns Claude must not modify (evals, golden dataset, etc.) |
+| **Forbidden Files** | Glob patterns the agent must not modify (evals, golden dataset, etc.) |
 | **Constraints** | Additional rules (model restrictions, token limits, etc.) |
-| **Codebase Overview** | Map of the target repo so Claude knows where things are |
+| **Codebase Overview** | Map of the target repo so the agent knows where things are |
 | **Golden Dataset Info** | Size, categories, and difficulty distribution |
 
 ## Key Concepts
 
 ### MEMORY.md
 
-A shared memory file that persists across hypotheses within a job. Claude reads it at the start of each iteration and updates it after finishing. It tracks:
+A shared memory file that persists across hypotheses within a job. The coding agent reads it at the start of each iteration and updates it after finishing. It tracks:
 
 - **Current metrics** — accuracy, latency, cost after the latest accepted hypothesis
 - **Hypothesis log** — table of all attempts with decisions and impact
