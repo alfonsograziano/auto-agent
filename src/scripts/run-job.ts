@@ -7,12 +7,8 @@ import { randomBytes } from "node:crypto";
 import { createHypothesis } from "../utils/create-hypothesis.ts";
 import { initLogger, closeLogger, formatDuration, formatTimestamp } from "../utils/logger.ts";
 import { getHypothesisSystemPrompt } from "../utils/prompts.ts";
-import { assertClaudeInstalled, runClaude } from "../utils/run-claude.ts";
+import { createProvider, type ProviderName } from "../utils/providers/index.ts";
 import { runBaselineEvals } from "./run-baseline-evals.ts";
-
-// --- Preflight check ---
-
-assertClaudeInstalled();
 
 // --- CLI parsing ---
 
@@ -80,8 +76,14 @@ if (!existsSync(targetRepoPath)) {
   process.exit(1);
 }
 
+const providerMatch = jobMd.match(/\*\*Provider\*\*:\s*(.+)/);
+const providerName = (providerMatch?.[1]?.trim().toLowerCase() ?? "claude") as ProviderName;
+const provider = createProvider(providerName);
+provider.assertInstalled();
+
 console.log(`  Target repo:    ${styleText("cyan", targetRepoPath)}`);
 console.log(`  Base branch:    ${styleText("cyan", baseBranch)}`);
+console.log(`  Provider:       ${styleText("cyan", providerName)}`);
 console.log("");
 
 // --- Git helper ---
@@ -108,6 +110,7 @@ if (!existsSync(baselineDir)) {
     targetRepoPath,
     baseBranch,
     projectRoot,
+    provider,
   });
   console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("green", "✓")} Baseline evals ${styleText("dim", `(${formatDuration(Date.now() - baselineStart)})`)}`);
   console.log("");
@@ -263,22 +266,22 @@ for (let i = 0; i < maxIterations; i++) {
 
   const userPrompt = `Run hypothesis ${hypId} (iteration ${globalIteration}) for job "${jobId}". Analyze the failures, implement an improvement, run evals, and fill in the report.`;
 
-  // Spawn Claude Code
+  // Spawn agent
   console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("bold", "  Agent running...")}`);
   const agentStart = Date.now();
-  const exitCode = await runClaude(
+  const exitCode = await provider.run({
     systemPrompt,
     userPrompt,
-    targetRepoPath,
-    jobDir
-  );
+    cwd: targetRepoPath,
+    addDir: jobDir,
+  });
   console.log(`${styleText("dim", `[${formatTimestamp()}]`)} ${styleText("green", "✓")} Agent ${styleText("dim", `(${formatDuration(Date.now() - agentStart)})`)}`);
 
   // Parse decision from REPORT.md
   const reportPath = join(hypothesis.dir, "REPORT.md");
 
   if (exitCode !== 0) {
-    console.error(styleText("red", `\nClaude Code exited with code ${exitCode}.`));
+    console.error(styleText("red", `\nAgent exited with code ${exitCode}.`));
     process.exit(1);
   }
 
@@ -325,6 +328,10 @@ for (let i = 0; i < maxIterations; i++) {
   console.log(`  Best branch: ${styleText("cyan", bestBranch)}`);
   console.log(`${styleText("dim", "─".repeat(60))}`);
 }
+
+// --- Cleanup provider resources ---
+
+await provider.cleanup?.();
 
 // --- Final summary ---
 
